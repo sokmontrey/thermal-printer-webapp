@@ -22,9 +22,10 @@ export function webBluetoothAvailable(): boolean {
 
 interface BluetoothApi {
   requestDevice(options: {
-    filters: { services: string[] }[]
+    filters: ({ services: string[] } | { name: string })[]
     optionalServices?: string[]
   }): Promise<BluetoothDeviceLike>
+  getAvailability?(): Promise<boolean>
 }
 
 interface BluetoothDeviceLike {
@@ -78,14 +79,56 @@ export class WebBluetoothTransport implements Transport {
   static async request(): Promise<BluetoothDeviceLike> {
     if (!webBluetoothAvailable()) {
       throw new TransportError(
-        "Web Bluetooth is unavailable. Use Chrome or Edge on desktop over http://localhost.",
+        "Web Bluetooth is unavailable. Use Chrome or Edge over https, or Chrome on Android.",
+      )
+    }
+    if (!window.isSecureContext) {
+      throw new TransportError(
+        "Web Bluetooth needs a secure context. Serve this page over https.",
       )
     }
     const api = (navigator as unknown as { bluetooth: BluetoothApi }).bluetooth
-    return api.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
-      optionalServices: [NUS_SERVICE],
-    })
+
+    // Availability is a cheap pre-check; on Android it reports whether the
+    // adapter is on. Without it the chooser can spin indefinitely with no
+    // explanation when Bluetooth is off.
+    const availability = api.getAvailability?.bind(api)
+    if (availability) {
+      const ok = await availability().catch(() => true)
+      if (!ok) {
+        throw new TransportError(
+          "Bluetooth is off on this device. Turn it on, then retry.",
+        )
+      }
+    }
+
+    try {
+      // Filter by service UUID first. Many builds also honour the name filter,
+      // but some Android versions match only on the advertised name, so offer
+      // both filters: a device matching either one is listed.
+      return await api.requestDevice({
+        filters: [{ services: [NUS_SERVICE] }, { name: "thermalprint" }],
+        optionalServices: [NUS_SERVICE],
+      })
+    } catch (err) {
+      const name = err instanceof Error ? err.name : ""
+      if (name === "NotFoundError") {
+        throw new TransportError(
+          "No printer selected. If thermalprint is missing from the list, the board is not advertising — press its reset button and retry.",
+        )
+      }
+      if (name === "SecurityError" || name === "NotAllowedError") {
+        throw new TransportError(
+          "Bluetooth permission denied. Allow it for this site, then retry.",
+        )
+      }
+      if (name === "NetworkError") {
+        throw new TransportError(
+          "Could not reach the printer. It may be connected to another device — unpair it in your phone's Bluetooth settings and retry.",
+        )
+      }
+      throw err instanceof Error ? err : new TransportError(String(err))
+    }
   }
 
   static async open(device: BluetoothDeviceLike): Promise<WebBluetoothTransport> {

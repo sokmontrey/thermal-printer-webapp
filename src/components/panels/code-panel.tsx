@@ -43,40 +43,56 @@ export function CodePanel({ disabled, run }: Props) {
           QR plus nine 1-D symbologies. Barcodes are ASCII only.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-wrap items-end gap-3">
-        <div className="min-w-64 flex-1 space-y-1.5">
+      <CardContent className="space-y-3">
+        <div className="space-y-1.5">
           <Label htmlFor="code-data">Content</Label>
-          <Input id="code-data" value={data} onChange={(e) => setData(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Type</Label>
-          <Select value={kind} onValueChange={setKind}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="QR">QR</SelectItem>
-              {Object.keys(BARCODE_TYPES).map((name) => (
-                <SelectItem key={name} value={name}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="code-size">Size</Label>
           <Input
-            id="code-size"
-            type="number"
-            min={1}
-            max={16}
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
-            className="w-24"
+            id="code-data"
+            value={data}
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className="h-11 sm:h-9"
+            onChange={(e) => setData(e.target.value)}
           />
         </div>
-        <Button disabled={disabled || !data} onClick={() => void print()}>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Type</Label>
+            <Select value={kind} onValueChange={setKind}>
+              <SelectTrigger className="h-11 w-full sm:h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="QR">QR</SelectItem>
+                {Object.keys(BARCODE_TYPES).map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="code-size">Size</Label>
+            <Input
+              id="code-size"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={16}
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              className="h-11 sm:h-9"
+            />
+          </div>
+        </div>
+        <Button
+          className="h-11 w-full sm:h-9"
+          disabled={disabled || !data}
+          onClick={() => void print()}
+        >
           Print code
         </Button>
       </CardContent>

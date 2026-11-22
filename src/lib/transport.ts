@@ -12,6 +12,17 @@ export interface Transport {
   close(): Promise<void>
 }
 
+/**
+ * Where the bridge lives. Same-origin by default, which is right when the
+ * bridge also serves the app. Set VITE_BRIDGE_URL at build time when the app
+ * is hosted separately (e.g. static hosting + a bridge on the LAN).
+ */
+export function bridgeBase(): string {
+  const configured = import.meta.env.VITE_BRIDGE_URL as string | undefined
+  if (configured) return configured.replace(/\/$/, "")
+  return "/api"
+}
+
 export class TransportError extends Error {}
 
 interface SerialPortInfoLike {
@@ -173,7 +184,7 @@ export class BridgeTransport implements Transport {
   readonly target: string
   private base: string
 
-  constructor(target: string, base = "/api") {
+  constructor(target: string, base = bridgeBase()) {
     this.target = target
     this.base = base
     this.label = target

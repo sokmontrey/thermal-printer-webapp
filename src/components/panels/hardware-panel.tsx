@@ -49,28 +49,34 @@ export function HardwarePanel({ disabled, run }: Props) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-end gap-2">
-            <div className="space-y-1.5">
+            <div className="flex-1 space-y-1.5">
               <Label htmlFor="density">Heating time</Label>
               <Input
                 id="density"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 max={255}
                 value={density}
                 onChange={(e) => setDensity(e.target.value)}
-                className="w-28"
+                className="h-11 sm:h-9"
               />
             </div>
-            <Button disabled={disabled} onClick={() => void setD(Number(density))}>
+            <Button
+              className="h-11 sm:h-9"
+              disabled={disabled}
+              onClick={() => void setD(Number(density))}
+            >
               Set
             </Button>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             {PRESETS.map(([label, value]) => (
               <Button
                 key={label}
                 size="sm"
                 variant="secondary"
+                className="h-11 sm:h-8"
                 disabled={disabled}
                 onClick={() => void setD(value)}
               >
@@ -91,28 +97,31 @@ export function HardwarePanel({ disabled, run }: Props) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-end gap-2">
-            <div className="space-y-1.5">
+            <div className="flex-1 space-y-1.5">
               <Label htmlFor="dots">Dots</Label>
               <Input
                 id="dots"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 value={dots}
                 onChange={(e) => setDots(e.target.value)}
-                className="w-28"
+                className="h-11 sm:h-9"
               />
             </div>
             <Button
+              className="h-11 sm:h-9"
               disabled={disabled}
               onClick={() => void run(`feed ${dots} dots`, (c) => c.feedDots(Number(dots)))}
             >
               Feed dots
             </Button>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <Button
               size="sm"
               variant="secondary"
+              className="h-11 sm:h-8"
               disabled={disabled}
               onClick={() => void run("feed 1 line", (c) => c.feedLines(1))}
             >
@@ -121,6 +130,7 @@ export function HardwarePanel({ disabled, run }: Props) {
             <Button
               size="sm"
               variant="secondary"
+              className="h-11 sm:h-8"
               disabled={disabled}
               onClick={() => void run("feed 5 lines", (c) => c.feedLines(5))}
             >

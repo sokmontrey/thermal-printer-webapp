@@ -5,20 +5,31 @@
 // Connections must persist because IMG:<seq> chunks accumulate on the board
 // until IMGDONE arrives.
 //
-//   npm run bridge        (defaults to 127.0.0.1:8787)
-//   BRIDGE_PORT=9000 npm run bridge
+// This is also the deployment server: set BRIDGE_STATIC=1 and it serves the
+// built app from ./dist, so one process gives phones both the UI and the relay.
+//
+//   npm run bridge                      local dev, 127.0.0.1:8787
+//   BRIDGE_STATIC=1 npm start           serve dist + API on 0.0.0.0:8787
+//   BRIDGE_HOST=0.0.0.0 BRIDGE_PORT=9000 npm run bridge
 
+import fs from "node:fs"
 import http from "node:http"
 import net from "node:net"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 const PORT = Number(process.env.BRIDGE_PORT || 8787)
 const HOST = process.env.BRIDGE_HOST || "127.0.0.1"
 const DEFAULT_TIMEOUT = 8000
+const STATIC_DIR = process.env.BRIDGE_STATIC === "1"
+  ? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist")
+  : null
 
-const DEFAULT_TARGETS = [
-  "thermalprint.local:9100",
-  "192.168.4.1:9100",
-]
+// A printer on a fixed address (e.g. a deployed home network) can be pinned so
+// clients that cannot scan mDNS still have a default.
+const DEFAULT_TARGETS = process.env.PRINTER_TARGET
+  ? [process.env.PRINTER_TARGET]
+  : ["thermalprint.local:9100", "192.168.4.1:9100"]
 
 // target -> { socket, reader, pending, connected }
 const links = new Map()
@@ -143,6 +154,44 @@ function json(res, status, payload) {
   res.end(body)
 }
 
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".json": "application/json",
+  ".woff2": "font/woff2",
+}
+
+// Serves the built SPA, falling back to index.html for client-side routes.
+function serveStatic(pathname, res) {
+  const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "")
+  const resolved = path.resolve(STATIC_DIR, rel)
+  if (!resolved.startsWith(STATIC_DIR)) {
+    res.writeHead(403).end("forbidden")
+    return
+  }
+  const target = fs.existsSync(resolved) && fs.statSync(resolved).isFile()
+    ? resolved
+    : path.join(STATIC_DIR, "index.html")
+  fs.readFile(target, (err, data) => {
+    if (err) {
+      res.writeHead(404).end("not found")
+      return
+    }
+    res.writeHead(200, {
+      "content-type": MIME[path.extname(target)] || "application/octet-stream",
+      "cache-control": target.endsWith("index.html")
+        ? "no-cache"
+        : "public, max-age=31536000, immutable",
+    })
+    res.end(data)
+  })
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     json(res, 204, {})
@@ -188,6 +237,11 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    if (STATIC_DIR && req.method === "GET") {
+      serveStatic(url.pathname, res)
+      return
+    }
+
     json(res, 404, { error: "not found" })
   } catch (err) {
     json(res, 502, { error: String(err?.message || err) })
@@ -195,5 +249,12 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`printer bridge listening on http://${HOST}:${PORT}`)
+  const shown = HOST === "0.0.0.0" ? "all interfaces" : HOST
+  console.log(`printer bridge listening on http://${HOST}:${PORT} (${shown})`)
+  if (STATIC_DIR) {
+    console.log(`serving app from ${STATIC_DIR}`)
+    if (!fs.existsSync(path.join(STATIC_DIR, "index.html"))) {
+      console.warn("dist/index.html missing — run `npm run build` first")
+    }
+  }
 })

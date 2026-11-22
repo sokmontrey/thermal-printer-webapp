@@ -12,10 +12,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { ConnState } from "@/hooks/use-printer"
 import { grantedPorts, webSerialAvailable } from "@/lib/transport"
 import { rememberedBleDevices, webBluetoothAvailable } from "@/lib/bluetooth"
+import { unavailableReason, type Capabilities } from "@/lib/platform"
+import { cn } from "@/lib/utils"
 
 type Mode = "usb" | "bluetooth" | "wifi"
 
@@ -23,6 +24,7 @@ interface Props {
   target: string
   state: ConnState
   busy: boolean
+  caps: Capabilities
   onConnectUsb: () => Promise<unknown>
   onConnectUsbKnown: (index?: number) => Promise<unknown>
   onConnectBluetooth: () => Promise<unknown>
@@ -35,10 +37,17 @@ interface Props {
 
 const SUGGESTIONS = ["thermalprint.local:9100", "192.168.4.1:9100"]
 
+const MODES = [
+  { value: "usb", label: "USB", icon: Usb },
+  { value: "bluetooth", label: "Bluetooth", icon: Bluetooth },
+  { value: "wifi", label: "WiFi", icon: Wifi },
+] as const
+
 export function ConnectionPanel({
   target,
   state,
   busy,
+  caps,
   onConnectUsb,
   onConnectUsbKnown,
   onConnectBluetooth,
@@ -48,13 +57,16 @@ export function ConnectionPanel({
   onStatus,
   onInit,
 }: Props) {
-  const [mode, setMode] = useState<Mode>("usb")
+  // USB is impossible on a phone, so start on Bluetooth there.
+  const [mode, setMode] = useState<Mode>(caps.mobile ? "bluetooth" : "usb")
   const [value, setValue] = useState(target)
   const [granted, setGranted] = useState(0)
   const [remembered, setRemembered] = useState(0)
   const connected = state === "connected"
   const serialReady = webSerialAvailable()
   const bluetoothReady = webBluetoothAvailable()
+  const serialWhy = unavailableReason("serial")
+  const bluetoothWhy = unavailableReason("bluetooth")
 
   useEffect(() => {
     grantedPorts().then((ports) => setGranted(ports.length)).catch(() => setGranted(0))
@@ -74,43 +86,45 @@ export function ConnectionPanel({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
           <Cable className="size-4" />
           Connection
         </CardTitle>
         <CardDescription>
-          USB and Bluetooth talk to the board directly from the browser. WiFi
-          goes through the local bridge to TCP 9100.
+          USB and Bluetooth connect straight from the browser. WiFi goes through
+          the bridge.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
-          <TabsList>
-            <TabsTrigger value="usb">
-              <Usb className="size-3.5" />
-              USB
-            </TabsTrigger>
-            <TabsTrigger value="bluetooth">
-              <Bluetooth className="size-3.5" />
-              Bluetooth
-            </TabsTrigger>
-            <TabsTrigger value="wifi">
-              <Wifi className="size-3.5" />
-              WiFi
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+          {MODES.map(({ value: m, label, icon: Icon }) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={cn(
+                "flex min-h-10 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
+                mode === m
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          ))}
+        </div>
 
         {mode === "usb" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              {serialReady
-                ? "Chrome or Edge will ask which serial device to open. Pick the XIAO (usually usbmodem or ttyACM)."
-                : "Web Serial is not available in this browser. Use Chrome or Edge on desktop, served from localhost or https."}
+              {serialWhy ??
+                "Chrome or Edge will ask which serial device to open. Pick the XIAO (usbm or ttyACM)."}
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button
+                className="h-11 sm:h-9"
                 disabled={!serialReady || busy || state === "connecting"}
                 onClick={() => void attempt(onConnectUsb, "over USB")}
               >
@@ -118,6 +132,7 @@ export function ConnectionPanel({
               </Button>
               {granted > 0 && (
                 <Button
+                  className="h-11 sm:h-9"
                   variant="secondary"
                   disabled={busy}
                   onClick={() => void attempt(() => onConnectUsbKnown(0), "over USB")}
@@ -125,7 +140,12 @@ export function ConnectionPanel({
                   Reconnect last port
                 </Button>
               )}
-              <Button variant="outline" disabled={!connected} onClick={() => void onDisconnect()}>
+              <Button
+                className="h-11 sm:h-9"
+                variant="outline"
+                disabled={!connected}
+                onClick={() => void onDisconnect()}
+              >
                 Disconnect
               </Button>
             </div>
@@ -135,12 +155,12 @@ export function ConnectionPanel({
         {mode === "bluetooth" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              {bluetoothReady
-                ? "Needs the printer_ble firmware. Chrome or Edge will ask which device to pair; pick thermalprint."
-                : "Web Bluetooth is not available in this browser. Use Chrome or Edge on desktop."}
+              {bluetoothWhy ??
+                "Needs the printer_ble firmware. The browser will ask which device to connect; pick thermalprint."}
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button
+                className="h-11 sm:h-9"
                 disabled={!bluetoothReady || busy || state === "connecting"}
                 onClick={() => void attempt(onConnectBluetooth, "over Bluetooth")}
               >
@@ -148,6 +168,7 @@ export function ConnectionPanel({
               </Button>
               {remembered > 0 && (
                 <Button
+                  className="h-11 sm:h-9"
                   variant="secondary"
                   disabled={busy}
                   onClick={() => void attempt(() => onConnectBluetoothKnown(0), "over Bluetooth")}
@@ -155,39 +176,55 @@ export function ConnectionPanel({
                   Reconnect remembered
                 </Button>
               )}
-              <Button variant="outline" disabled={!connected} onClick={() => void onDisconnect()}>
+              <Button
+                className="h-11 sm:h-9"
+                variant="outline"
+                disabled={!connected}
+                onClick={() => void onDisconnect()}
+              >
                 Disconnect
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Images are slow over BLE (about one acknowledge round trip per 900-byte
-              chunk). Text and codes are fine.
+              Images take a few seconds over BLE (one acknowledge per 900-byte
+              chunk). Text, QR and barcodes are quick.
             </p>
           </div>
         )}
 
         {mode === "wifi" && (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-64 flex-1 space-y-1.5">
-                <Label htmlFor="target">Printer address</Label>
-                <Input
-                  id="target"
-                  value={value}
-                  placeholder="host:port"
-                  onChange={(e) => setValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void attempt(() => onConnectWifi(value), "over WiFi")
-                  }}
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="target">Printer address</Label>
+              <Input
+                id="target"
+                value={value}
+                placeholder="host:port"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className="h-11 sm:h-9"
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void attempt(() => onConnectWifi(value), "over WiFi")
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button
+                className="h-11 sm:h-9"
                 disabled={busy || state === "connecting"}
                 onClick={() => void attempt(() => onConnectWifi(value), "over WiFi")}
               >
                 Connect WiFi
               </Button>
-              <Button variant="outline" disabled={!connected} onClick={() => void onDisconnect()}>
+              <Button
+                className="h-11 sm:h-9"
+                variant="outline"
+                disabled={!connected}
+                onClick={() => void onDisconnect()}
+              >
                 Disconnect
               </Button>
             </div>
@@ -208,21 +245,33 @@ export function ConnectionPanel({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              Needs <code className="rounded bg-muted px-1">npm run bridge</code> running and
-              the printer_wifi firmware flashed.
+              Needs the bridge reachable from this device and the printer_wifi
+              firmware flashed.
             </p>
           </div>
         )}
 
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          <Badge variant={connected ? "default" : "secondary"}>
+          <Badge variant={connected ? "default" : "secondary"} className="capitalize">
             {connected ? "connected" : state}
           </Badge>
-          <Button size="sm" variant="outline" disabled={!connected || busy} onClick={() => void onStatus()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9"
+            disabled={!connected || busy}
+            onClick={() => void onStatus()}
+          >
             <RefreshCw className="size-3.5" />
             Status
           </Button>
-          <Button size="sm" variant="outline" disabled={!connected || busy} onClick={() => void onInit()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9"
+            disabled={!connected || busy}
+            onClick={() => void onInit()}
+          >
             Re-init
           </Button>
         </div>

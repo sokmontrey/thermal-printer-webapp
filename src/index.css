@@ -78,8 +78,41 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-mono, ui-monospace, monospace);
+    /* Stop iOS rubber-banding the whole page behind fixed bars. */
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 16px minimum prevents iOS Safari zooming on focus. */
+  input,
+  textarea,
+  select,
+  button {
+    font-size: max(16px, 1em);
+  }
+  @media (min-width: 640px) {
+    input,
+    textarea,
+    select,
+    button {
+      font-size: inherit;
+    }
+  }
+}
+
+/* Touch targets: unlayered so it wins over utility heights like h-9.
+   Switches keep their own compact size; their label is the tap target. */
+@media (max-width: 639px), (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  textarea,
+  select,
+  [role="combobox"] {
+    min-height: 44px;
   }
 }

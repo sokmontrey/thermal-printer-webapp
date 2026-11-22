@@ -1,4 +1,5 @@
 export type Dither = "floyd-steinberg" | "atkinson" | "bayer" | "threshold"
+export type Rotation = 0 | 90 | 180 | 270
 
 export interface ImageSettings {
   width: number
@@ -8,6 +9,17 @@ export interface ImageSettings {
   contrast: number
   gamma: number
   invert: boolean
+  rotate: Rotation
+}
+
+export const ROTATIONS: Rotation[] = [0, 90, 180, 270]
+
+/** Largest raster the firmware accepts (TP_BUF_SIZE in printer_protocol.h). */
+export const MAX_RASTER_BYTES = 64000
+
+/** Bytes a binarized raster will occupy, including the 8-byte GS v 0 header. */
+export function rasterBytes(width: number, height: number): number {
+  return 8 + Math.ceil(width / 8) * height
 }
 
 export const DITHER_LABELS: Record<Dither, string> = {
@@ -17,6 +29,47 @@ export const DITHER_LABELS: Record<Dither, string> = {
   threshold: "Threshold",
 }
 
+/**
+ * Output size for an image rendered at `width`, after rotation.
+ *
+ * Rotating a quarter turn swaps which source dimension maps onto the printer's
+ * width, so the height is derived from the swapped aspect ratio. In every case
+ * the result preserves the source aspect ratio and fills `width`, except when
+ * that would exceed the firmware's raster buffer — then the width is reduced
+ * and the aspect ratio is kept, rather than letting the print fail with
+ * ERR:FULL on the board.
+ */
+export function outputSize(
+  srcW: number,
+  srcH: number,
+  width: number,
+  rotate: Rotation,
+): { width: number; height: number } {
+  const maxW = Math.max(8, Math.min(384, Math.round(width)))
+  const quarter = rotate === 90 || rotate === 270
+  const ratio = quarter ? srcW / srcH : srcH / srcW
+
+  let w = maxW
+  let h = Math.max(1, Math.round(ratio * w))
+  // Shrink to fit the buffer, keeping the exact aspect ratio.
+  while (w > 8 && rasterBytes(w, h) > MAX_RASTER_BYTES) {
+    w -= 1
+    h = Math.max(1, Math.round(ratio * w))
+  }
+  return { width: w, height: h }
+}
+
+/** True when the requested width had to be reduced to fit the printer buffer. */
+export function wasClamped(
+  srcW: number,
+  srcH: number,
+  width: number,
+  rotate: Rotation,
+): boolean {
+  const ideal = Math.max(8, Math.min(384, Math.round(width)))
+  return outputSize(srcW, srcH, width, rotate).width < ideal
+}
+
 /** Maps an <img>/ImageBitmap to a grayscale matrix scaled to the target width. */
 export function toGray(
   source: CanvasImageSource,
@@ -24,8 +77,7 @@ export function toGray(
   srcH: number,
   settings: ImageSettings,
 ): number[][] {
-  const width = Math.max(8, Math.min(384, Math.round(settings.width)))
-  const height = Math.max(1, Math.round((srcH / srcW) * width))
+  const { width, height } = outputSize(srcW, srcH, settings.width, settings.rotate)
 
   const canvas = document.createElement("canvas")
   canvas.width = width
@@ -34,7 +86,18 @@ export function toGray(
   if (!ctx) throw new Error("canvas 2d context unavailable")
   ctx.fillStyle = "#fff"
   ctx.fillRect(0, 0, width, height)
-  ctx.drawImage(source, 0, 0, width, height)
+
+  // Draw unrotated at natural aspect, sized so that after rotation it fills the
+  // canvas: a quarter turn swaps the draw dimensions.
+  const quarter = settings.rotate === 90 || settings.rotate === 270
+  const drawW = quarter ? height : width
+  const drawH = quarter ? width : height
+  ctx.save()
+  ctx.translate(width / 2, height / 2)
+  ctx.rotate((settings.rotate * Math.PI) / 180)
+  ctx.drawImage(source, -drawW / 2, -drawH / 2, drawW, drawH)
+  ctx.restore()
+
   const { data } = ctx.getImageData(0, 0, width, height)
 
   const rows: number[][] = []
@@ -153,19 +216,55 @@ export function raster(bits: boolean[][]): Uint8Array {
   return out
 }
 
-/** Half-block preview strings, mirroring the TUI renderers. */
-export function previewRows(bits: boolean[][]): string[] {
-  const rows: string[] = []
-  for (let y = 0; y < bits.length; y += 2) {
+/**
+ * Half-block preview strings, mirroring the TUI renderers.
+ *
+ * A monospace preview at 384 columns is much wider than its container, so this
+ * downsamples to fit `maxCols` x `maxRows`.
+ *
+ * Half-block cells are not square: a character is `cellAspect` times wider than
+ * a code line is tall. Sampling therefore uses different steps per axis, chosen
+ * so the rendered preview has the same aspect ratio as the image. `cellAspect`
+ * is measured from the DOM (`charWidth / lineHeight`) by the caller.
+ */
+export function previewRows(
+  bits: boolean[][],
+  maxCols = Infinity,
+  maxRows = Infinity,
+  cellAspect = 0.6,
+): string[] {
+  const h = bits.length
+  const w = bits[0]?.length ?? 0
+  if (h === 0 || w === 0) return []
+
+  const colsBudget = Math.max(1, Math.min(w, maxCols))
+  const rowsBudget = Math.max(1, Math.min(Math.ceil(h / 2), maxRows))
+
+  // A character covers stepX dots across and 2*stepY dots down. Undistorted
+  // rendering needs stepX / (2*stepY) = cellAspect, i.e. stepX = 2*cellAspect*stepY.
+  // Pick the smallest step that satisfies both budgets.
+  const stepY = Math.max(
+    0.5,
+    h / (2 * rowsBudget),
+    w / (2 * Math.max(0.05, cellAspect) * colsBudget),
+  )
+  const stepX = 2 * cellAspect * stepY
+
+  const outCols = Math.max(1, Math.floor(w / stepX))
+  const outRows = Math.max(1, Math.floor(h / (2 * stepY)))
+
+  const out: string[] = []
+  for (let ry = 0; ry < outRows; ry++) {
+    const yTop = Math.min(h - 1, Math.floor(ry * 2 * stepY))
+    const yBottom = Math.min(h - 1, Math.floor(ry * 2 * stepY + stepY))
     let line = ""
-    const top = bits[y]
-    const bottom = bits[y + 1]
-    for (let x = 0; x < top.length; x++) {
-      const t = top[x]
-      const b = bottom ? bottom[x] : false
+    for (let rx = 0; rx < outCols; rx++) {
+      const x = Math.min(w - 1, Math.floor(rx * stepX))
+      const t = bits[yTop]?.[x] ?? false
+      const b = bits[yBottom]?.[x] ?? false
       line += t && b ? "█" : t ? "▀" : b ? "▄" : " "
     }
-    rows.push(line)
+    out.push(line)
   }
-  return rows
+  return out
 }

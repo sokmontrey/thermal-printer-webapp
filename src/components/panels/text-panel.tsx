@@ -83,7 +83,7 @@ export function TextPanel({ disabled, run }: Props) {
           <div className="space-y-1.5">
             <Label>Align</Label>
             <Select value={align} onValueChange={setAlign}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="h-11 w-32 sm:h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -98,14 +98,19 @@ export function TextPanel({ disabled, run }: Props) {
             <Input
               id="feed"
               type="number"
+              inputMode="numeric"
               min={0}
               max={255}
               value={feed}
               onChange={(e) => setFeed(e.target.value)}
-              className="w-28"
+              className="h-11 w-28 sm:h-9"
             />
           </div>
-          <Button disabled={disabled} onClick={() => void print()}>
+          <Button
+            className="h-11 w-full sm:h-9 sm:w-auto"
+            disabled={disabled}
+            onClick={() => void print()}
+          >
             Print text
           </Button>
         </div>
